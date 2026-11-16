@@ -136,6 +136,11 @@ EPISODE_PROPERTIES = [
     "playcount",
 ]
 MOVIE_PROPERTIES = ["resume", "art", "runtime", "rating", "year", "playcount"]
+TVSHOW_PROPERTIES = ["art", "year", "season", "episode", "watchedepisodes"]
+# Kodi returns TV shows/seasons/episodes in database insertion order when no sort is given
+TVSHOW_SORT = {"method": "sorttitle", "order": "ascending", "ignorearticle": True}
+SEASON_SORT = {"method": "season", "order": "ascending"}
+EPISODE_SORT = {"method": "episode", "order": "ascending"}
 
 
 class MediaBrowser:
@@ -510,6 +515,25 @@ class MediaBrowser:
             duration=MediaBrowser.get_duration(episode),
         )
 
+    @staticmethod
+    def get_tv_subtitle(
+        year: int | None, seasons: int | None, episodes: int | None, watched: int | None
+    ) -> str | None:
+        """Build a TV show/season subtitle, e.g. "2004 - 3 seasons - 12/40 watched"."""
+        parts: list[str] = []
+        if year:
+            parts.append(str(year))
+        if seasons:
+            parts.append(f"{seasons} season{'' if seasons == 1 else 's'}")
+        if episodes:
+            if watched and watched >= episodes:
+                parts.append(f"{episodes} ep. - Watched")
+            elif watched:
+                parts.append(f"{watched}/{episodes} watched")
+            else:
+                parts.append(f"{episodes} ep.")
+        return " - ".join(parts) or None
+
     def get_item_from_tvshow(self, show: dict[str, Any], parent_id: str) -> BrowseMediaItem:
         """Build item from TV Show."""
         art = get_artwork(show.get("art", None))
@@ -520,6 +544,9 @@ class MediaBrowser:
             media_id = parent_id + "/" + media_id
         return BrowseMediaItem(
             title=strip_kodi_formatting(show.get("label", "")),
+            subtitle=MediaBrowser.get_tv_subtitle(
+                show.get("year"), show.get("season"), show.get("episode"), show.get("watchedepisodes")
+            ),
             media_id=media_id,
             media_class=MediaClass.TV_SHOW,
             media_type=MediaContentType.TV_SHOW,
@@ -538,6 +565,7 @@ class MediaBrowser:
             media_id = parent_id + "/" + media_id
         return BrowseMediaItem(
             title=strip_kodi_formatting(season.get("label", "")),
+            subtitle=MediaBrowser.get_tv_subtitle(None, None, season.get("episode"), season.get("watchedepisodes")),
             media_id=media_id,
             media_class=MediaClass.SEASON,
             media_type=MediaContentType.SEASON,
@@ -1261,8 +1289,9 @@ class MediaBrowser:
                         )
                         end -= 1
                     arguments = {
-                        "properties": ["art", "season", "showtitle"],
+                        "properties": ["art", "season", "showtitle", "episode", "watchedepisodes"],
                         "tvshowid": int(real_media_id),
+                        "sort": SEASON_SORT,
                         "limits": {
                             "start": (pagination_options.page - 1) * limit,
                             "end": end,
@@ -1300,6 +1329,7 @@ class MediaBrowser:
                         "properties": EPISODE_PROPERTIES,
                         "tvshowid": int(show_id),
                         "season": int(season),
+                        "sort": EPISODE_SORT,
                         "limits": {
                             "start": (pagination_options.page - 1) * limit,
                             "end": end,
@@ -1475,8 +1505,9 @@ class MediaBrowser:
                         )
                         end -= 1
                     arguments = {
-                        "properties": ["art", "genre"],
+                        "properties": TVSHOW_PROPERTIES + ["genre"],
                         "filter": {"genreid": int(real_media_id)},
+                        "sort": TVSHOW_SORT,
                         "limits": {
                             "start": (pagination_options.page - 1) * limit,
                             "end": end,
@@ -1853,7 +1884,8 @@ class MediaBrowser:
         else:
             end = paging.page * limit
         arguments: dict[str, Any] = {
-            "properties": ["art"],
+            "properties": TVSHOW_PROPERTIES,
+            "sort": TVSHOW_SORT,
             "limits": {
                 "start": (paging.page - 1) * limit,
                 "end": end,
@@ -2383,7 +2415,7 @@ KODI_BROWSING: list[KodiMediaEntry] = [
         media_type=MediaContentType.TV_SHOW,
         media_id="kodi://tvshows/all",
         command="VideoLibrary.GetTVShows",
-        arguments={"properties": ["art"]},
+        arguments={"properties": TVSHOW_PROPERTIES, "sort": TVSHOW_SORT},
         child_media_type=MediaContentType.TV_SHOW,
         output=KodiObjectType.TV_SHOW,
     ),
@@ -2394,7 +2426,7 @@ KODI_BROWSING: list[KodiMediaEntry] = [
         media_class=MediaClass.TV_SHOW,
         media_id="kodi://tvshows/current",
         command="VideoLibrary.GetInProgressTVShows",
-        arguments={"properties": ["art"]},
+        arguments={"properties": TVSHOW_PROPERTIES, "sort": TVSHOW_SORT},
         child_media_type=MediaContentType.TV_SHOW,
         output=KodiObjectType.TV_SHOW,
     ),
