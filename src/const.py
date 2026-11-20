@@ -185,6 +185,15 @@ KODI_MEDIA_TYPES: dict[str, MediaContentType] = {
     "audio": MediaContentType.MUSIC,
 }
 
+# Removed from the media player when volume control is disabled (volume handled by an AV receiver instead)
+KODI_VOLUME_FEATURES = [
+    Features.VOLUME,
+    Features.VOLUME_UP_DOWN,
+    Features.MUTE_TOGGLE,
+    Features.MUTE,
+    Features.UNMUTE,
+]
+
 KODI_FEATURES = [
     Features.ON_OFF,
     #  Features.TOGGLE,

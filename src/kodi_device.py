@@ -43,6 +43,7 @@ from config import KodiConfigDevice
 from const import (
     KODI_FEATURES,
     KODI_MEDIA_TYPES,
+    KODI_VOLUME_FEATURES,
     ButtonKeymap,
     IKodiDevice,
     KodiSelects,
@@ -308,7 +309,11 @@ class KodiDevice(IKodiDevice):
         self._session: ClientSession | None = None
         self._kodi_connection: KodiWSConnection | None = None
         self._kodi: Kodi | None = None
-        self._supported_features = KODI_FEATURES
+        self._supported_features = (
+            [f for f in KODI_FEATURES if f not in KODI_VOLUME_FEATURES]
+            if device_config.disable_volume_control
+            else KODI_FEATURES
+        )
         self._players = None
         self._properties = {}
         self._item = {}
@@ -429,12 +434,13 @@ class KodiDevice(IKodiDevice):
     def on_volume_changed(self, sender: Any, data: dict[str, Any]):
         """Handle the volume changes."""
         _LOG.debug("[%s] Kodi volume changed %s", self.device_config.address, data)
-        volume = self._volume
         muted = self._is_volume_muted
         self._app_properties["volume"] = data["volume"]
         self._app_properties["muted"] = data["muted"]
         updated_data = {}
-        if volume != self._volume:
+        # Compare against the new value (this used to compare the previous value with itself, so volume changes were
+        # never reported and the remote's volume slider showed stale values)
+        if self._volume != int(self._app_properties["volume"]):
             self._volume = int(self._app_properties["volume"])
             updated_data[MediaAttr.VOLUME] = self._volume
             updated_data[KodiSensors.SENSOR_VOLUME] = self._volume
