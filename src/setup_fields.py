@@ -233,6 +233,14 @@ SETUP_FIELDS = [
     },
     {
         "field": {"checkbox": {"value": False}},
+        "id": "disable_volume_control",
+        "label": {
+            "en": "Disable volume control (leave Kodi at 100% and control the volume on the AV receiver)",
+            "fr": "Désactiver le contrôle du volume (laisser Kodi à 100% et régler le volume sur l'amplificateur)",
+        },
+    },
+    {
+        "field": {"checkbox": {"value": False}},
         "id": "disable_keyboard_map",
         "label": {
             "en": "Disable keyboard map : check only if some commands fail (eg arrow keys)",

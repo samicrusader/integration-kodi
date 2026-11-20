@@ -436,6 +436,11 @@ class SetupFlow:
                     )
                     set_setup_field(
                         user_input.settings,
+                        "disable_volume_control",
+                        self._reconfigured_device.disable_volume_control,
+                    )
+                    set_setup_field(
+                        user_input.settings,
                         "sensor_audio_stream_config",
                         self._reconfigured_device.sensor_audio_stream_config,
                     )
@@ -620,6 +625,7 @@ class SetupFlow:
         media_update_task = msg.input_values.get("media_update_task", "false") == "true"
         download_artwork = msg.input_values.get("download_artwork", "false") == "true"
         disable_keyboard_map = msg.input_values.get("disable_keyboard_map", "false") == "true"
+        disable_volume_control = msg.input_values.get("disable_volume_control", "false") == "true"
         show_stream_name = msg.input_values.get("show_stream_name", "false") == "true"
         show_stream_language_name = msg.input_values.get("show_stream_language_name", "false") == "true"
         sensor_include_device_name = msg.input_values.get("sensor_include_device_name", "false") == "true"
@@ -720,6 +726,7 @@ class SetupFlow:
                 media_update_task=media_update_task,
                 download_artwork=download_artwork,
                 disable_keyboard_map=disable_keyboard_map,
+                disable_volume_control=disable_volume_control,
                 show_stream_name=show_stream_name,
                 show_stream_language_name=show_stream_language_name,
                 sensor_audio_stream_config=sensor_audio_stream_config,
@@ -768,6 +775,7 @@ class SetupFlow:
         media_update_task = msg.input_values.get("media_update_task", "false") == "true"
         download_artwork = msg.input_values.get("download_artwork", "false") == "true"
         disable_keyboard_map = msg.input_values.get("disable_keyboard_map", "false") == "true"
+        disable_volume_control = msg.input_values.get("disable_volume_control", "false") == "true"
         show_stream_name = msg.input_values.get("show_stream_name", "false") == "true"
         show_stream_language_name = msg.input_values.get("show_stream_language_name", "false") == "true"
         sensor_include_device_name = msg.input_values.get("sensor_include_device_name", "false") == "true"
@@ -802,6 +810,7 @@ class SetupFlow:
         self._reconfigured_device.media_update_task = media_update_task
         self._reconfigured_device.download_artwork = download_artwork
         self._reconfigured_device.disable_keyboard_map = disable_keyboard_map
+        self._reconfigured_device.disable_volume_control = disable_volume_control
         self._reconfigured_device.show_stream_name = show_stream_name
         self._reconfigured_device.show_stream_language_name = show_stream_language_name
         self._reconfigured_device.sensor_audio_stream_config = sensor_audio_stream_config

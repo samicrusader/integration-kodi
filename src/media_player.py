@@ -36,6 +36,16 @@ from const import (
 _LOG = logging.getLogger(__name__)
 
 
+VOLUME_COMMANDS = (
+    Commands.VOLUME,
+    Commands.VOLUME_UP,
+    Commands.VOLUME_DOWN,
+    Commands.MUTE_TOGGLE,
+    Commands.MUTE,
+    Commands.UNMUTE,
+)
+
+
 class KodiMediaPlayer(KodiEntity, MediaPlayer):
     """Representation of a Kodi Media Player entity."""
 
@@ -81,6 +91,9 @@ class KodiMediaPlayer(KodiEntity, MediaPlayer):
         if not device.kodi_connection or not device.kodi_connection.connected:
             await device.connect()
 
+        if device.device_config.disable_volume_control and cmd_id in VOLUME_COMMANDS:
+            _LOG.info("[%s] Volume control is disabled, ignoring %s", device.device_config.address, cmd_id)
+            return StatusCodes.NOT_IMPLEMENTED
         if cmd_id == Commands.VOLUME:
             res = await device.set_volume_level(params.get("volume"))
         elif cmd_id == Commands.VOLUME_UP:
