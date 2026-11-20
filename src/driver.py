@@ -475,6 +475,7 @@ async def main():
     logging.getLogger("setup_flow").setLevel(level)
     logging.getLogger("config").setLevel(level)
     logging.getLogger("media_browser").setLevel(level)
+    logging.getLogger("browse_cache").setLevel(level)
     logging.getLogger("pykodi.kodi").setLevel(level)
 
     # Load driver config

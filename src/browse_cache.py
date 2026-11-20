@@ -19,11 +19,14 @@ import asyncio
 import base64
 import io
 import logging
+import re
+import ssl
 import time
 from collections import OrderedDict
 from typing import Any, Awaitable, Callable
+from urllib.parse import unquote, unquote_plus, urlsplit
 
-from aiohttp import ClientSession, ClientTimeout
+from aiohttp import ClientSession, ClientTimeout, TCPConnector
 from ucapi.media_player import BrowseMediaItem
 
 _LOG = logging.getLogger(__name__)
@@ -49,7 +52,52 @@ THUMBNAIL_CACHE_SIZE = 600
 PAGE_CACHE_TTL = 90.0
 PAGE_CACHE_SIZE = 40
 
+# Plex photo transcoder URLs (as written by PlexKodiConnect) carry the requested size: ask for a small image instead
+PLEX_TRANSCODE_SIZE = re.compile(r"([?&](?:width|height)=)\d+")
+PLEX_THUMBNAIL_SIZE = "480"
+
+ORIGINAL_URL_ATTR = "_kodi_thumbnail_url"
+
 BrowseResult = tuple[BrowseMediaItem, Any]
+
+
+def _ssl_context() -> ssl.SSLContext:
+    try:
+        import certifi  # pylint: disable = C0415
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:  # pragma: no cover
+        return ssl.create_default_context()
+
+
+def _redact(url: str) -> str:
+    """Hide credentials and tokens in logged URLs."""
+    url = re.sub(r"//[^/@]+@", "//***@", url)
+    return re.sub(r"(X-Plex-Token(?:=|%3D|%253D))[^&%/]+", r"\1***", url, flags=re.IGNORECASE)
+
+
+def source_urls(url: str) -> list[str]:
+    """
+    Return the URLs to try for a Kodi thumbnail URL, best first.
+
+    Kodi's /image/ web handler only serves images already in its texture cache. For an uncached image it checks the
+    original URL exists first, which fails for e.g. Plex transcoder URLs, and answers 404. So when the Kodi image
+    path wraps a remote http(s) URL, fetch that URL directly (shrunk if it is a Plex transcode) and only fall back to
+    Kodi's /image/ endpoint (local files, smb://, special://...).
+    """
+    parts = urlsplit(url)
+    marker = "/image/"
+    if marker not in parts.path:
+        return [url]
+    image_path = unquote_plus(parts.path.split(marker, 1)[1])  # image://<url-encoded original>/
+    if not image_path.startswith("image://"):
+        return [url]
+    original = unquote(image_path[len("image://") :].rstrip("/"))
+    if not original.startswith(("http://", "https://")):
+        return [url]
+    if "/photo/:/transcode" in original:
+        original = PLEX_TRANSCODE_SIZE.sub(lambda m: m.group(1) + PLEX_THUMBNAIL_SIZE, original)
+    return [original, url]
 BrowseFn = Callable[[], Awaitable[BrowseResult | None]]
 
 
@@ -82,7 +130,7 @@ class ThumbnailCache:
 
     def _get_session(self) -> ClientSession:
         if self._session is None or self._session.closed:
-            self._session = ClientSession(timeout=FETCH_TIMEOUT)
+            self._session = ClientSession(timeout=FETCH_TIMEOUT, connector=TCPConnector(ssl=_ssl_context()))
         return self._session
 
     async def close(self) -> None:
@@ -97,28 +145,27 @@ class ThumbnailCache:
             self._cache.popitem(last=False)
 
     async def _fetch(self, url: str) -> str | None:
+        transient = False
         async with self._semaphore:
-            try:
-                async with self._get_session().get(url) as response:
-                    if response.status != 200:
-                        _LOG.debug(
-                            "[%s] Thumbnail HTTP %s: %s",
-                            self._address,
-                            response.status,
-                            url,
-                        )
-                        self._store(url, None)
-                        return None
-                    data = await response.read()
-                encoded = await asyncio.to_thread(_encode_thumbnail, data)
-            except Exception as ex:  # pylint: disable = W0718
-                # Do not cache transient failures (timeouts...), only bad responses above
-                _LOG.debug(
-                    "[%s] Thumbnail fetch failed (%s): %s", self._address, ex, url
-                )
-                return None
-        self._store(url, encoded)
-        return encoded
+            for source in source_urls(url):
+                try:
+                    async with self._get_session().get(source) as response:
+                        if response.status != 200:
+                            _LOG.debug("[%s] Thumbnail HTTP %s: %s", self._address, response.status, _redact(source))
+                            continue
+                        data = await response.read()
+                    encoded = await asyncio.to_thread(_encode_thumbnail, data)
+                    if encoded:
+                        self._store(url, encoded)
+                        return encoded
+                except Exception as ex:  # pylint: disable = W0718
+                    transient = True
+                    _LOG.debug("[%s] Thumbnail fetch failed (%s): %s", self._address, ex, _redact(source))
+        # Remember hard failures (every source answered with an error) so the URL is not retried on every page;
+        # timeouts and connection errors are retried next time
+        if not transient:
+            self._store(url, None)
+        return None
 
     def _task(self, url: str) -> asyncio.Task:
         task = self._pending.get(url)
@@ -136,9 +183,12 @@ class ThumbnailCache:
             return
         waiting: dict[asyncio.Task, list[BrowseMediaItem]] = {}
         for item in items:
-            url = item.thumbnail
+            # The original Kodi URL is kept on the item (not serialized: asdict only uses dataclass fields), so a cached
+            # page whose thumbnail was still loading can be filled in later
+            url = getattr(item, ORIGINAL_URL_ATTR, None) or item.thumbnail
             if not url or not url.startswith(("http://", "https://")):
                 continue
+            setattr(item, ORIGINAL_URL_ATTR, url)
             if url in self._cache:
                 self._cache.move_to_end(url)
                 # None = Kodi has no usable image: drop the URL so the remote shows its default icon
@@ -148,14 +198,15 @@ class ThumbnailCache:
         if not waiting:
             return
         done, _ = await asyncio.wait(waiting.keys(), timeout=deadline)
-        for task in done:
-            if (
-                not task.cancelled()
-                and task.exception() is None
-                and (encoded := task.result())
-            ):
-                for item in waiting[task]:
-                    item.thumbnail = encoded
+        for task, task_items in waiting.items():
+            encoded = None
+            if task in done and not task.cancelled() and task.exception() is None:
+                encoded = task.result()
+            # Never hand a Kodi /image/ URL to the remote: an uncached image 404s for the remote exactly like it does
+            # here, and it then logs errors instead of showing its default icon. Thumbnails still loading are filled
+            # in when the page is requested again.
+            for item in task_items:
+                item.thumbnail = encoded
         if len(done) < len(waiting):
             _LOG.debug(
                 "[%s] %d/%d thumbnails not ready after %.1fs, still loading in background",
