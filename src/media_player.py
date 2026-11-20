@@ -8,7 +8,7 @@ Media-player entity functions.
 import logging
 from typing import Any, Literal, cast
 
-from ucapi import EntityTypes, MediaPlayer, Pagination, StatusCodes
+from ucapi import EntityTypes, MediaPlayer, Pagination, Paging, StatusCodes
 from ucapi.media_player import (
     Attributes,
     BrowseOptions,
@@ -21,6 +21,7 @@ from ucapi.media_player import (
 )
 
 import kodi_device
+from browse_cache import BrowseCache
 from config import KodiConfigDevice, KodiEntity, create_entity_id
 from const import (
     KODI_ACTIONS_KEYMAP,
@@ -43,6 +44,7 @@ class KodiMediaPlayer(KodiEntity, MediaPlayer):
         """Initialize the class."""
         # pylint: disable = R0801
         self._device: kodi_device.KodiDevice = device
+        self._browse_cache = BrowseCache(config_device.address)
         entity_id = create_entity_id(config_device.id, EntityTypes.MEDIA_PLAYER)
         features = device.supported_features
         attributes = filter_attributes(device.attributes, Attributes)
@@ -251,7 +253,15 @@ class KodiMediaPlayer(KodiEntity, MediaPlayer):
         if self._device.app_language is None:
             await self._device.update_app_language()
 
-        result = await self._device.media_browser.browse_media(options.media_id, options.media_type, options.paging)
+        page = options.paging.page if options.paging else Paging.DEFAULT_PAGE
+        limit = options.paging.limit if options.paging else Paging.DEFAULT_LIMIT
+
+        async def browse_page(page_number: int):
+            return await self._device.media_browser.browse_media(
+                options.media_id, options.media_type, Paging(page=page_number, limit=limit)
+            )
+
+        result = await self._browse_cache.browse(options.media_id, options.media_type, page, limit, browse_page)
         if result is None:
             return StatusCodes.NOT_FOUND
         browse_media_results, pagination = result
@@ -282,6 +292,7 @@ class KodiMediaPlayer(KodiEntity, MediaPlayer):
         if result is None:
             return StatusCodes.NOT_FOUND
         media_results, pagination = result
+        await self._browse_cache.embed_thumbnails(media_results)
         return SearchResults(
             media=media_results,
             pagination=Pagination(page=pagination.page, limit=pagination.limit, count=pagination.count),
