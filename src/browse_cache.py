@@ -92,12 +92,14 @@ def source_urls(url: str) -> list[str]:
     image_path = unquote_plus(parts.path.split(marker, 1)[1])  # image://<url-encoded original>/
     if not image_path.startswith("image://"):
         return [url]
-    original = unquote(image_path[len("image://") :].rstrip("/"))
+    original = unquote(image_path.removeprefix("image://").rstrip("/"))
     if not original.startswith(("http://", "https://")):
         return [url]
     if "/photo/:/transcode" in original:
         original = PLEX_TRANSCODE_SIZE.sub(lambda m: m.group(1) + PLEX_THUMBNAIL_SIZE, original)
     return [original, url]
+
+
 BrowseFn = Callable[[], Awaitable[BrowseResult | None]]
 
 
